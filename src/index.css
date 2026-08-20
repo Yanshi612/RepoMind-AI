@@ -1,0 +1,108 @@
+@import "tailwindcss";
+
+/* ─── Global token overrides ─── */
+*, *::before, *::after { box-sizing: border-box; }
+
+:root {
+  --bg-base:       #07080f;
+  --bg-surface:    #0d0f1a;
+  --bg-card:       #111422;
+  --bg-card-hover: #161929;
+  --border:        rgba(255,255,255,0.07);
+  --border-bright: rgba(255,255,255,0.13);
+  --accent-blue:   #3b82f6;
+  --accent-purple: #8b5cf6;
+  --accent-cyan:   #06b6d4;
+  --text-primary:  #f1f5f9;
+  --text-muted:    #64748b;
+  --text-dim:      #334155;
+  --glow-blue:     0 0 40px rgba(59,130,246,0.18);
+  --glow-purple:   0 0 40px rgba(139,92,246,0.18);
+  --radius-xl:     16px;
+  --radius-2xl:    24px;
+}
+
+html { scroll-behavior: smooth; }
+
+body {
+  font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+  background-color: var(--bg-base);
+  color: var(--text-primary);
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+/* ─── Scrollbar ─── */
+::-webkit-scrollbar       { width: 5px; height: 5px; }
+::-webkit-scrollbar-track { background: var(--bg-surface); }
+::-webkit-scrollbar-thumb { background: #1e293b; border-radius: 99px; }
+::-webkit-scrollbar-thumb:hover { background: #334155; }
+
+/* ─── Gradient text utility ─── */
+.gradient-text {
+  background: linear-gradient(135deg, #60a5fa 0%, #a78bfa 50%, #67e8f9 100%);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+}
+
+/* ─── Glass card ─── */
+.glass {
+  background: rgba(17, 20, 34, 0.8);
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+  border: 1px solid var(--border);
+}
+
+/* ─── Animated gradient border on focus ─── */
+.input-glow:focus {
+  border-color: var(--accent-blue) !important;
+  box-shadow: 0 0 0 3px rgba(59,130,246,0.15);
+}
+
+/* ─── Progress bar shimmer ─── */
+@keyframes shimmer {
+  0%   { background-position: -200% center; }
+  100% { background-position:  200% center; }
+}
+.progress-shimmer {
+  background: linear-gradient(
+    90deg,
+    #3b82f6 0%,
+    #8b5cf6 40%,
+    #06b6d4 70%,
+    #3b82f6 100%
+  );
+  background-size: 200% auto;
+  animation: shimmer 2s linear infinite;
+}
+
+/* ─── Pulse dot ─── */
+@keyframes pulse-ring {
+  0%   { transform: scale(1);   opacity: 1;   }
+  100% { transform: scale(2.2); opacity: 0;   }
+}
+.pulse-dot::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  border-radius: 50%;
+  background: currentColor;
+  animation: pulse-ring 1.4s ease-out infinite;
+}
+
+/* ─── Fade-in ─── */
+@keyframes fadeUp {
+  from { opacity: 0; transform: translateY(16px); }
+  to   { opacity: 1; transform: translateY(0);    }
+}
+.fade-up { animation: fadeUp 0.45s ease both; }
+
+/* ─── Hero glow blobs ─── */
+.blob {
+  position: absolute;
+  border-radius: 50%;
+  filter: blur(100px);
+  pointer-events: none;
+  opacity: 0.35;
+}
