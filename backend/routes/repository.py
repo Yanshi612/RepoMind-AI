@@ -207,10 +207,8 @@ async def ask(question: str, repo_url: str):
 
 async def _run_analysis_job(job_id: str, repo_url: str):
     """
-    Orchestrates all heavy work off the HTTP request thread.
-    asyncio.to_thread() runs each blocking call on a thread pool,
-    keeping the FastAPI event loop free for other requests.
-    Checks for cancellation between every step.
+    Orchestrates cloning, analysis, and indexing steps.
+    Saves job state to disk after every step for serverless resilience.
     """
 
     def is_cancelled() -> bool:
@@ -223,6 +221,8 @@ async def _run_analysis_job(job_id: str, repo_url: str):
         # ----------------------------------------
 
         jobs[job_id]["status"] = "size_check"
+        jobs[job_id]["progress"] = 15
+        _save_jobs()
         if is_cancelled(): return
 
         await asyncio.to_thread(check_repo_size, repo_url)
@@ -234,6 +234,8 @@ async def _run_analysis_job(job_id: str, repo_url: str):
 
         if is_cancelled(): return
         jobs[job_id]["status"] = "cloning"
+        jobs[job_id]["progress"] = 35
+        _save_jobs()
 
         repo_path = await asyncio.to_thread(clone_repository, repo_url)
         print(f"[{job_id}] Clone complete: {repo_path}")
@@ -244,6 +246,8 @@ async def _run_analysis_job(job_id: str, repo_url: str):
 
         if is_cancelled(): return
         jobs[job_id]["status"] = "analyzing"
+        jobs[job_id]["progress"] = 50
+        _save_jobs()
 
         stats = await asyncio.to_thread(analyze_repository, repo_path)
         print(f"[{job_id}] Analysis complete: {stats}")
@@ -254,6 +258,8 @@ async def _run_analysis_job(job_id: str, repo_url: str):
 
         if is_cancelled(): return
         jobs[job_id]["status"] = "indexing"
+        jobs[job_id]["progress"] = 65
+        _save_jobs()
 
         result = await asyncio.to_thread(
             stream_and_index,
@@ -285,10 +291,10 @@ async def _run_analysis_job(job_id: str, repo_url: str):
 
     except Exception as e:
 
-        if not is_cancelled():
-            print(f"[{job_id}] Job failed: {e}")
-            jobs[job_id].update({
-                "status": "error",
-                "error":  str(e)
-            })
-            _save_jobs()
+        err_msg = str(e) or "An unexpected error occurred during repository analysis."
+        print(f"[{job_id}] Job failed: {err_msg}")
+        jobs[job_id].update({
+            "status": "error",
+            "error":  err_msg
+        })
+        _save_jobs()
