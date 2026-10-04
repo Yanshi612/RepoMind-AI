@@ -47,16 +47,11 @@ _load_jobs()
 # ==================================================
 
 @router.post("/analyze")
-async def analyze(repo_url: str, background_tasks: BackgroundTasks):
+async def analyze(repo_url: str):
     """
     Accepts a GitHub repository URL and immediately returns a job_id.
-    The actual cloning, analysis, and indexing runs in the background.
-    Poll GET /status/{job_id} to track progress.
+    The job is processed upon the first GET /status/{job_id} poll.
     """
-
-    # --------------------------------------------------
-    # Validate URL
-    # --------------------------------------------------
 
     if not repo_url or not repo_url.startswith("http"):
         raise HTTPException(
@@ -64,37 +59,22 @@ async def analyze(repo_url: str, background_tasks: BackgroundTasks):
             detail="Please provide a valid GitHub repository URL."
         )
 
-    # --------------------------------------------------
-    # Create job entry
-    # --------------------------------------------------
-
     job_id = str(uuid.uuid4())
 
     jobs[job_id] = {
         "status":   "queued",
-        "progress": 0,
+        "progress": 5,
         "repo_url": repo_url,
         "error":    None,
         "result":   None
     }
     _save_jobs()
 
-    # --------------------------------------------------
-    # Run analysis job directly for Vercel Serverless compatibility
-    # --------------------------------------------------
-
-    try:
-        await _run_analysis_job(job_id, repo_url)
-    except Exception as e:
-        print(f"Direct job execution error: {e}")
-
-    _load_jobs()
-
-    return jobs.get(job_id, {
+    return {
         "job_id":  job_id,
         "status":  "queued",
         "message": "Repository analysis started. Poll /status/{job_id} for progress."
-    })
+    }
 
 
 # ==================================================
@@ -105,16 +85,7 @@ async def analyze(repo_url: str, background_tasks: BackgroundTasks):
 async def get_status(job_id: str):
     """
     Returns the current status and progress of an analysis job.
-
-    Possible statuses:
-      queued      → job is waiting to start
-      size_check  → checking repo size via GitHub API
-      cloning     → git clone --depth 1 in progress
-      analyzing   → counting files and building stats
-      indexing    → embedding + storing in ChromaDB (progress 0-100)
-      done        → completed successfully
-      cancelled   → user aborted the job
-      error       → failed (check 'error' field)
+    Advances queued jobs on Vercel Serverless.
     """
 
     _load_jobs()
@@ -125,7 +96,18 @@ async def get_status(job_id: str):
             detail=f"Job '{job_id}' not found."
         )
 
-    return jobs[job_id]
+    job = jobs[job_id]
+
+    # If job is in queued state, trigger analysis
+    if job.get("status") == "queued":
+        repo_url = job.get("repo_url")
+        try:
+            await _run_analysis_job(job_id, repo_url)
+        except Exception as e:
+            print(f"Status job execution error: {e}")
+        _load_jobs()
+
+    return jobs.get(job_id, job)
 
 
 # ==================================================

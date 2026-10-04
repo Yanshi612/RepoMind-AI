@@ -15,7 +15,9 @@ export async function startAnalysis(repoUrl) {
 
 export function pollStatus(jobId, onProgress, intervalMs = 2000) {
   return new Promise((resolve, reject) => {
-    const timer = setInterval(async () => {
+    let timer = null;
+
+    const check = async () => {
       try {
         const res = await API.get(`/status/${jobId}`);
         const data = res.data;
@@ -23,24 +25,35 @@ export function pollStatus(jobId, onProgress, intervalMs = 2000) {
         onProgress(data.status, data.progress ?? 0);
 
         if (data.status === "done") {
-          clearInterval(timer);
+          if (timer) clearInterval(timer);
           resolve(data.result);
+          return true;
         }
 
         if (data.status === "error") {
-          clearInterval(timer);
+          if (timer) clearInterval(timer);
           reject(new Error(data.error || "Analysis failed."));
+          return true;
         }
 
         if (data.status === "cancelled") {
-          clearInterval(timer);
+          if (timer) clearInterval(timer);
           reject(new Error("Cancelled by user."));
+          return true;
         }
       } catch (err) {
-        clearInterval(timer);
+        if (timer) clearInterval(timer);
         reject(err);
+        return true;
       }
-    }, intervalMs);
+      return false;
+    };
+
+    check().then((finished) => {
+      if (!finished) {
+        timer = setInterval(check, intervalMs);
+      }
+    });
   });
 }
 
