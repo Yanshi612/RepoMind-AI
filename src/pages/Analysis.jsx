@@ -1,3 +1,4 @@
+import { normalizeRepoUrl } from "../utils/normalizeRepoUrl";
 import { useState, useEffect, useRef } from "react";
 import Navbar from "../components/Navbar";
 import { askAI } from "../services/api";
@@ -30,7 +31,7 @@ function Analysis() {
   const handleAsk = async () => {
     const q = question.trim();
     if (!q) return setError("Please type a question.");
-    const repoUrl = analysis?.repo_url;
+    const repoUrl = normalizeRepoUrl(analysis?.repo_url);
     if (!repoUrl) return setError("No repository found. Please analyze one first.");
 
     setError("");
@@ -205,3 +206,4 @@ function Analysis() {
 }
 
 export default Analysis;
+

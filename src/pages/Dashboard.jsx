@@ -1,3 +1,4 @@
+import { normalizeRepoUrl } from "../utils/normalizeRepoUrl";
 import { useNavigate } from "react-router-dom";
 import Sidebar from "../components/Sidebar";
 
@@ -89,8 +90,7 @@ function Dashboard() {
     }
   })();
 
-  const rawRepoUrl = analysis?.repo_url;
-  const repoUrl = typeof rawRepoUrl === "string" ? rawRepoUrl : (rawRepoUrl?.url || rawRepoUrl?.html_url || rawRepoUrl?.repo_url || "");
+  const repoUrl = normalizeRepoUrl(analysis?.repo_url);
   const stats    = analysis?.stats    || {};
   const vectorDb = analysis?.vector_db || {};
 
@@ -245,3 +245,4 @@ function Dashboard() {
 }
 
 export default Dashboard;
+
