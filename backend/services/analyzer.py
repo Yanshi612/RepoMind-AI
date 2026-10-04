@@ -310,7 +310,7 @@ def stream_and_index(
     Progress is written back to the jobs dict so /status can report it.
     """
 
-    from ai_engine.rag import index_chunks_stream
+    from ai_engine.rag import index_batched_chunks
     from langchain_text_splitters import RecursiveCharacterTextSplitter
 
     splitter = RecursiveCharacterTextSplitter(
@@ -320,59 +320,42 @@ def stream_and_index(
 
     print("EXTRACTOR: Starting streaming extraction")
 
-    # Two-pass: first collect file list (for progress %), then process
     all_files = list(_walk_code_files(repo_path))
     total     = max(len(all_files), 1)
-    total_chunks = 0
-    processed    = 0
+    processed = 0
+
+    all_chunks = []
+    all_metadatas = []
 
     for abs_path, rel_path in all_files:
-
-        # ----------------------------------------
-        # Binary / noise filter
-        # ----------------------------------------
-
         if not is_processable_file(rel_path, abs_path):
             processed += 1
             continue
 
-        # ----------------------------------------
-        # Chunked read — no full-file RAM spike
-        # ----------------------------------------
-
         content = _read_file_chunked(abs_path)
-
         if content is None:
             processed += 1
             continue
 
-        # ----------------------------------------
-        # Split into overlapping text chunks
-        # ----------------------------------------
-
         chunks = splitter.split_text(content)
-
-        if chunks:
-            print(f"EXTRACTOR: Indexing {rel_path} ({len(chunks)} chunks)")
-            index_chunks_stream(chunks, rel_path, repo_url)
-            total_chunks += len(chunks)
-
-        # ----------------------------------------
-        # Update progress in the job store
-        # ----------------------------------------
+        for c in chunks:
+            if c.strip():
+                all_chunks.append(c)
+                all_metadatas.append({"file_name": rel_path})
 
         processed += 1
-        jobs[job_id]["progress"] = int(processed / total * 100)
-
-        # Explicit GC hint — release memory immediately
+        jobs[job_id]["progress"] = int(processed / total * 50)
         del content, chunks
 
-    print(f"EXTRACTOR: Done. {processed} files, {total_chunks} chunks indexed.")
+    print(f"EXTRACTOR: Scanned {processed} files. Batch indexing {len(all_chunks)} chunks...")
+    index_batched_chunks(all_chunks, all_metadatas, repo_url, job_id, jobs)
+
+    print(f"EXTRACTOR: Done. {processed} files, {len(all_chunks)} chunks indexed.")
 
     return {
         "message":       "Code indexed successfully",
         "files_scanned": processed,
-        "chunks_stored": total_chunks
+        "chunks_stored": len(all_chunks)
     }
 
 

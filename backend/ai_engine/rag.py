@@ -153,6 +153,37 @@ def store_code_in_vector_db(documents, repo_url: str):
     _save_indexes()
 
 
+def index_batched_chunks(chunks, metadatas, repo_url, job_id=None, jobs=None):
+    repo_id = get_repo_id(repo_url)
+    existing = _repo_indexes.setdefault(repo_id, [])
+
+    total_chunks = len(chunks)
+    if total_chunks == 0:
+        _save_indexes()
+        return
+
+    for start in range(0, total_chunks, EMBED_BATCH_SIZE):
+        batch_chunks = chunks[start:start + EMBED_BATCH_SIZE]
+        batch_metadatas = metadatas[start:start + EMBED_BATCH_SIZE]
+
+        batch_vectors = _embed_documents(batch_chunks)
+
+        for i, vector in enumerate(batch_vectors):
+            meta = dict(batch_metadatas[i])
+            meta["repo_id"] = repo_id
+            existing.append({
+                "text": batch_chunks[i],
+                "embedding": vector,
+                "metadata": meta,
+            })
+
+        if job_id and jobs and job_id in jobs:
+            progress_pct = 50 + int((start + len(batch_chunks)) / total_chunks * 48)
+            jobs[job_id]["progress"] = min(progress_pct, 98)
+
+    _save_indexes()
+
+
 def index_chunks_stream(chunks, file_name, repo_url):
     repo_id = get_repo_id(repo_url)
 

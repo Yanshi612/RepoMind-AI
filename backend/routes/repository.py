@@ -80,16 +80,21 @@ async def analyze(repo_url: str, background_tasks: BackgroundTasks):
     _save_jobs()
 
     # --------------------------------------------------
-    # Schedule background work — does NOT block
+    # Run analysis job directly for Vercel Serverless compatibility
     # --------------------------------------------------
 
-    background_tasks.add_task(_run_analysis_job, job_id, repo_url)
+    try:
+        await _run_analysis_job(job_id, repo_url)
+    except Exception as e:
+        print(f"Direct job execution error: {e}")
 
-    return {
+    _load_jobs()
+
+    return jobs.get(job_id, {
         "job_id":  job_id,
         "status":  "queued",
         "message": "Repository analysis started. Poll /status/{job_id} for progress."
-    }
+    })
 
 
 # ==================================================
