@@ -1,7 +1,7 @@
 import axios from "axios";
 
 const API = axios.create({
-  baseURL: "https://repo-mind-ai-pdyq-5gefvdjnb-yanshi612s-projects.vercel.app",
+  baseURL: "https://repo-mind-ai-pdyq.vercel.app",
 });
 
 export default API;
