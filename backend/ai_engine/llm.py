@@ -1,4 +1,5 @@
 import os
+import time
 import warnings
 
 # Suppress FutureWarning from any stale google.generativeai usage
@@ -48,24 +49,32 @@ Answer clearly and in detail. Mention file names where relevant."""
     if _SDK == "new":
         candidate_models = [
             "gemini-2.0-flash",
-            "gemini-2.5-flash",
             "gemini-1.5-flash",
         ]
         client = genai.Client(api_key=api_key)
         last_error = None
 
         for model_name in candidate_models:
-            try:
-                response = client.models.generate_content(
-                    model=model_name,
-                    contents=prompt,
-                )
-                return response.text
-            except Exception as e:
-                print(f"[llm] model '{model_name}' failed: {e}")
-                last_error = e
+            for attempt in range(4):
+                try:
+                    response = client.models.generate_content(
+                        model=model_name,
+                        contents=prompt,
+                    )
+                    return response.text
+                except Exception as e:
+                    err_str = str(e).lower()
+                    if any(k in err_str for k in ["429", "resource_exhausted", "quota", "rate limit", "too many requests"]):
+                        wait = 5 * (2 ** attempt)
+                        print(f"[llm] 429 Rate limit on '{model_name}'. Waiting {wait}s...")
+                        time.sleep(wait)
+                        last_error = e
+                    else:
+                        print(f"[llm] model '{model_name}' failed: {e}")
+                        last_error = e
+                        break
 
-        return f"Gemini API error: {last_error}"
+        return f"Gemini API rate limit exceeded. Please wait a minute and try again. ({last_error})"
 
     # ── Legacy SDK fallback (google-generativeai) ─────────────────────────
     else:

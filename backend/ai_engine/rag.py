@@ -49,29 +49,48 @@ def get_repo_id(repo_url: str) -> str:
     return hashlib.md5(repo_url.rstrip("/").encode()).hexdigest()[:12]
 
 
+def call_with_retry(func, max_retries=5, initial_backoff=6.0):
+    for attempt in range(max_retries):
+        try:
+            return func()
+        except Exception as e:
+            err_str = str(e).lower()
+            if any(k in err_str for k in ["429", "resource_exhausted", "quota", "rate limit", "too many requests"]):
+                wait_time = initial_backoff * (2 ** attempt)
+                print(f"[Gemini 429 Rate Limit] Waiting {wait_time}s before retry (attempt {attempt + 1}/{max_retries})...")
+                time.sleep(wait_time)
+            else:
+                raise e
+    return func()
+
+
 def _embed_documents(texts):
-    time.sleep(0.8)
-    result = gemini_client.models.embed_content(
-        model=EMBEDDING_MODEL,
-        contents=texts,
-        config=types.EmbedContentConfig(
-            task_type="RETRIEVAL_DOCUMENT",
-            output_dimensionality=EMBEDDING_DIMENSIONS,
-        ),
-    )
+    time.sleep(4.0)
+    def _do():
+        return gemini_client.models.embed_content(
+            model=EMBEDDING_MODEL,
+            contents=texts,
+            config=types.EmbedContentConfig(
+                task_type="RETRIEVAL_DOCUMENT",
+                output_dimensionality=EMBEDDING_DIMENSIONS,
+            ),
+        )
+    result = call_with_retry(_do, max_retries=5, initial_backoff=6.0)
     return [array("f", e.values) for e in result.embeddings]
 
 
 def _embed_query(text):
     time.sleep(0.8)
-    result = gemini_client.models.embed_content(
-        model=EMBEDDING_MODEL,
-        contents=text,
-        config=types.EmbedContentConfig(
-            task_type="RETRIEVAL_QUERY",
-            output_dimensionality=EMBEDDING_DIMENSIONS,
-        ),
-    )
+    def _do():
+        return gemini_client.models.embed_content(
+            model=EMBEDDING_MODEL,
+            contents=text,
+            config=types.EmbedContentConfig(
+                task_type="RETRIEVAL_QUERY",
+                output_dimensionality=EMBEDDING_DIMENSIONS,
+            ),
+        )
+    result = call_with_retry(_do, max_retries=5, initial_backoff=6.0)
     return array("f", result.embeddings[0].values)
 
 
