@@ -1,16 +1,16 @@
 import { useNavigate } from "react-router-dom";
 import Sidebar from "../components/Sidebar";
 
-/* ─── Helpers ────────────────────────────────────────────────── */
+/* â”€â”€â”€ Helpers â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
 
 const FOOTER = (
   <p className="text-center text-xs py-6 mt-auto" style={{ color: "#334155" }}>
-    Powered by py · 2026
+    Powered by py Â· 2026
   </p>
 );
 
 /**
- * Generates deterministic scores (0–100) from a repo URL so every
+ * Generates deterministic scores (0â€“100) from a repo URL so every
  * repo shows consistent, unique numbers instead of the same static values.
  */
 function repoScores(repoUrl = "", stats = {}) {
@@ -44,7 +44,7 @@ function repoFindings(stats = {}, repoUrl = "") {
   const findings = [];
 
   if (stats?.total_files > 200) {
-    findings.push({ type: "warn", text: `Large repo: ${stats.total_files} files detected — consider modular refactoring` });
+    findings.push({ type: "warn", text: `Large repo: ${stats.total_files} files detected â€” consider modular refactoring` });
   }
   if (stats?.python_files > 0 && !stats?.total_files) {
     findings.push({ type: "warn", text: "Missing requirements.txt or pyproject.toml detected" });
@@ -61,7 +61,7 @@ function repoFindings(stats = {}, repoUrl = "") {
 
   // Pad with generic items if few findings
   const generic = [
-    { type: "warn", text: "Review dependency versions — some may have known vulnerabilities" },
+    { type: "warn", text: "Review dependency versions â€” some may have known vulnerabilities" },
     { type: "ok",   text: "Code structure is well-organized and follows clean architecture" },
     { type: "ok",   text: "No obvious hard-coded credentials detected in source files" },
     { type: "warn", text: "Consider adding unit test coverage for core service modules" },
@@ -75,7 +75,7 @@ function repoFindings(stats = {}, repoUrl = "") {
   return findings.slice(0, 5);
 }
 
-/* ─── Dashboard ──────────────────────────────────────────────── */
+/* â”€â”€â”€ Dashboard â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
 
 function Dashboard() {
   const navigate = useNavigate();
@@ -89,7 +89,8 @@ function Dashboard() {
     }
   })();
 
-  const repoUrl  = analysis?.repo_url || "";
+  const rawRepoUrl = analysis?.repo_url;
+  const repoUrl = typeof rawRepoUrl === "string" ? rawRepoUrl : (rawRepoUrl?.url || rawRepoUrl?.html_url || rawRepoUrl?.repo_url || "");
   const stats    = analysis?.stats    || {};
   const vectorDb = analysis?.vector_db || {};
 
@@ -136,7 +137,7 @@ function Dashboard() {
           {!repoName && (
             <div className="rounded-2xl p-12 text-center fade-up"
                  style={{ background: "#111422", border: "1px solid rgba(255,255,255,0.07)" }}>
-              <p className="text-3xl mb-4">📂</p>
+              <p className="text-3xl mb-4">ðŸ“‚</p>
               <h2 className="text-xl font-semibold mb-2">No Repository Analyzed Yet</h2>
               <p className="text-sm mb-6" style={{ color: "#64748b" }}>
                 Analyze a GitHub repo to see live dashboard metrics here.
@@ -174,7 +175,7 @@ function Dashboard() {
                 {/* File stats from real data */}
                 <div className="mt-6 grid grid-cols-2 sm:grid-cols-4 gap-4">
                   {[
-                    { label: "Total Files",  value: stats.total_files      ?? "—" },
+                    { label: "Total Files",  value: stats.total_files      ?? "â€”" },
                     { label: "Python",       value: stats.python_files      ?? 0   },
                     { label: "JavaScript",   value: stats.javascript_files  ?? 0   },
                     { label: "Chunks",       value: vectorDb.chunks_stored ?? vectorDb.chunks ?? 0 },
@@ -187,7 +188,7 @@ function Dashboard() {
                 </div>
               </div>
 
-              {/* Score cards — DYNAMIC per repo */}
+              {/* Score cards â€” DYNAMIC per repo */}
               <div className="grid grid-cols-1 md:grid-cols-3 gap-5 fade-up">
                 {SCORE_CARDS.map(({ label, value, color, bg, border }) => (
                   <div key={label} className="rounded-2xl p-7 transition-all duration-200 hover:scale-[1.02]"
@@ -203,7 +204,7 @@ function Dashboard() {
                 ))}
               </div>
 
-              {/* AI Findings — DYNAMIC */}
+              {/* AI Findings â€” DYNAMIC */}
               <div className="rounded-2xl p-7 fade-up"
                    style={{ background: "#111422", border: "1px solid rgba(255,255,255,0.07)" }}>
                 <h2 className="text-lg font-semibold mb-5">AI Findings</h2>
@@ -229,7 +230,7 @@ function Dashboard() {
                   onClick={() => navigate("/analysis")}
                   className="mt-6 w-full py-3.5 rounded-xl font-semibold text-sm transition-all duration-200 hover:opacity-90"
                   style={{ background: "linear-gradient(135deg,#8b5cf6,#3b82f6)", color: "#fff" }}>
-                  Ask AI About This Repository →
+                  Ask AI About This Repository â†’
                 </button>
               </div>
 

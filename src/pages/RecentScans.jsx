@@ -2,7 +2,7 @@ import { useState, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
 import Sidebar from "../components/Sidebar";
 
-/* ─── Helpers ────────────────────────────────────────────────── */
+/* â”€â”€â”€ Helpers â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
 
 function timeAgo(isoString) {
   if (!isoString) return "Unknown";
@@ -17,10 +17,11 @@ function timeAgo(isoString) {
 }
 
 function shortName(url = "") {
-  return url.replace("https://github.com/", "").replace(/\.git$/, "") || url;
+  const value = typeof url === "string" ? url : (url?.url || url?.html_url || url?.repo_url || "");
+  return value.replace("https://github.com/", "").replace(/\.git$/, "") || value;
 }
 
-/* ─── Component ──────────────────────────────────────────────── */
+/* â”€â”€â”€ Component â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
 
 function RecentScans() {
   const navigate = useNavigate();
@@ -113,7 +114,7 @@ function RecentScans() {
             <div className="flex flex-col gap-3 fade-up">
               {scans.map((scan, i) => {
                 const name   = shortName(scan.repo_url);
-                const files  = scan.stats?.total_files ?? "—";
+                const files  = scan.stats?.total_files ?? "â€”";
                 const chunks = scan.vector_db?.chunks_stored ?? scan.vector_db?.chunks ?? 0;
                 const lang   = scan.stats?.python_files > 0 ? "Python"
                              : scan.stats?.javascript_files > 0 ? "JavaScript"
@@ -177,7 +178,7 @@ function RecentScans() {
                       </span>
                       <span className="ml-auto text-xs font-medium transition-all group-hover:text-blue-400"
                             style={{ color: "#334155" }}>
-                        Load →
+                        Load â†’
                       </span>
                     </div>
                   </div>
@@ -197,7 +198,7 @@ function RecentScans() {
         </div>
 
         <p className="text-center text-xs py-6 mt-auto" style={{ color: "#334155" }}>
-          Powered by py · 2026
+          Powered by py Â· 2026
         </p>
       </main>
     </div>
