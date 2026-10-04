@@ -1,6 +1,7 @@
 import os
 import hashlib
 import math
+import time
 from array import array
 
 from google import genai
@@ -19,7 +20,7 @@ _repo_indexes = {}
 
 EMBEDDING_MODEL = "gemini-embedding-001"
 EMBEDDING_DIMENSIONS = 768
-EMBED_BATCH_SIZE = 16
+EMBED_BATCH_SIZE = 32
 
 
 def get_repo_id(repo_url: str) -> str:
@@ -27,6 +28,7 @@ def get_repo_id(repo_url: str) -> str:
 
 
 def _embed_documents(texts):
+    time.sleep(0.8)
     result = gemini_client.models.embed_content(
         model=EMBEDDING_MODEL,
         contents=texts,
@@ -39,6 +41,7 @@ def _embed_documents(texts):
 
 
 def _embed_query(text):
+    time.sleep(0.8)
     result = gemini_client.models.embed_content(
         model=EMBEDDING_MODEL,
         contents=text,
@@ -155,3 +158,4 @@ def query_repository(question, repo_url):
         "metadatas": [[item[1]["metadata"] for item in top]],
         "distances": [[1.0 - item[0] for item in top]],
     }
+
