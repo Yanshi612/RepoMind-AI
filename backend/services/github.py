@@ -166,16 +166,14 @@ def _safe_extract(zip_file: zipfile.ZipFile, destination: str):
 
 def clone_repository(repo_url: str) -> str:
     """
-    Downloads the repository's default branch as a ZIP archive
-    from GitHub and extracts it into /tmp.
+    Downloads a GitHub repository as a ZIP archive and extracts it
+    into the writable temporary directory used by Vercel.
 
-    This replaces GitPython and git clone, which is more suitable
-    for Vercel/serverless environments.
+    Returns the local path to the extracted repository.
     """
 
     owner, repo_name = _parse_repo(repo_url)
 
-    # Vercel/serverless writable temporary directory
     clones_dir = os.path.join(
         tempfile.gettempdir(),
         "repomind_cloned_repos",
@@ -197,9 +195,10 @@ def clone_repository(repo_url: str) -> str:
         f"{repo_name}_{url_hash}",
     )
 
-    # --------------------------------------------------------
-    # Get repository metadata / default branch
-    # --------------------------------------------------------
+    # Reuse an already extracted repository in this invocation.
+    if os.path.isdir(folder):
+        print(f"Repository already available: {folder}")
+        return folder
 
     api_url = f"https://api.github.com/repos/{owner}/{repo_name}"
 
@@ -223,18 +222,6 @@ def clone_repository(repo_url: str) -> str:
 
     print(f"GitHub default branch: {default_branch}")
 
-    # --------------------------------------------------------
-    # Reuse existing temporary clone if available
-    # --------------------------------------------------------
-
-    if os.path.isdir(folder):
-        print(f"Repository already available: {folder}")
-        return folder
-
-    # --------------------------------------------------------
-    # Download ZIP archive
-    # --------------------------------------------------------
-
     zip_url = (
         f"https://api.github.com/repos/"
         f"{owner}/{repo_name}/zipball/{default_branch}"
@@ -245,10 +232,17 @@ def clone_repository(repo_url: str) -> str:
         f"{repo_name}_{url_hash}.zip",
     )
 
+    extract_dir = os.path.join(
+        clones_dir,
+        f"{repo_name}_{url_hash}_extract",
+    )
+
     print(f"Downloading repository archive: {repo_url}")
-    print(f"Archive URL: {zip_url}")
 
     try:
+        shutil.rmtree(extract_dir, ignore_errors=True)
+        shutil.rmtree(folder, ignore_errors=True)
+
         with requests.get(
             zip_url,
             headers={
@@ -273,38 +267,27 @@ def clone_repository(repo_url: str) -> str:
                     if chunk:
                         archive.write(chunk)
 
-        # ----------------------------------------------------
-        # Extract archive
-        # ----------------------------------------------------
-
-        os.makedirs(folder, exist_ok=True)
+        os.makedirs(extract_dir, exist_ok=True)
 
         with zipfile.ZipFile(archive_path, "r") as zip_file:
-            _safe_extract(zip_file, folder)
+            _safe_extract(zip_file, extract_dir)
 
-        # GitHub ZIP usually contains a single top-level folder.
-        entries = os.listdir(folder)
+        entries = [
+            os.path.join(extract_dir, name)
+            for name in os.listdir(extract_dir)
+        ]
 
-        if len(entries) == 1:
-            possible_root = os.path.join(folder, entries[0])
-
-            if os.path.isdir(possible_root):
-                print(f"Repository extracted to: {possible_root}")
-
-                shutil.rmtree(folder)
-
-                os.rename(
-                    possible_root,
-                    folder,
-                )
+        # GitHub normally places everything inside one top-level folder.
+        if len(entries) == 1 and os.path.isdir(entries[0]):
+            extracted_root = entries[0]
+            shutil.move(extracted_root, folder)
+        else:
+            # Fallback for archives without a single top-level folder.
+            shutil.move(extract_dir, folder)
 
         print(f"Repository downloaded successfully: {folder}")
 
         return folder
-
-    except Exception:
-        shutil.rmtree(folder, ignore_errors=True)
-        raise
 
     finally:
         try:
@@ -312,3 +295,8 @@ def clone_repository(repo_url: str) -> str:
                 os.remove(archive_path)
         except Exception:
             pass
+
+        # Only remove the temporary extraction directory if it still exists.
+        if os.path.isdir(extract_dir):
+            shutil.rmtree(extract_dir, ignore_errors=True)
+
