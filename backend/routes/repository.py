@@ -1,5 +1,8 @@
 import uuid
 import asyncio
+import json
+import os
+import tempfile
 
 from fastapi import APIRouter, HTTPException, BackgroundTasks
 
@@ -13,11 +16,30 @@ router = APIRouter()
 
 
 # --------------------------------------------------
-# In-memory job store
-# Replace with Redis for multi-worker production
+# Job store with /tmp persistence
 # --------------------------------------------------
 
 jobs: dict[str, dict] = {}
+JOBS_FILE = os.path.join(tempfile.gettempdir(), "repomind_jobs.json")
+
+def _load_jobs():
+    global jobs
+    try:
+        if os.path.exists(JOBS_FILE):
+            with open(JOBS_FILE, "r") as f:
+                jobs.update(json.load(f))
+    except Exception:
+        pass
+
+def _save_jobs():
+    try:
+        with open(JOBS_FILE, "w") as f:
+            json.dump(jobs, f)
+    except Exception:
+        pass
+
+_load_jobs()
+
 
 
 # ==================================================
@@ -55,6 +77,7 @@ async def analyze(repo_url: str, background_tasks: BackgroundTasks):
         "error":    None,
         "result":   None
     }
+    _save_jobs()
 
     # --------------------------------------------------
     # Schedule background work — does NOT block
@@ -89,6 +112,8 @@ async def get_status(job_id: str):
       error       → failed (check 'error' field)
     """
 
+    _load_jobs()
+
     if job_id not in jobs:
         raise HTTPException(
             status_code=404,
@@ -109,6 +134,8 @@ async def cancel_job(job_id: str):
     and exits early at the next safe checkpoint.
     """
 
+    _load_jobs()
+
     if job_id not in jobs:
         raise HTTPException(
             status_code=404,
@@ -125,6 +152,7 @@ async def cancel_job(job_id: str):
         "progress": 0,
         "error":    "Cancelled by user."
     })
+    _save_jobs()
 
     print(f"[{job_id}] Job cancelled by user.")
 
@@ -263,6 +291,7 @@ async def _run_analysis_job(job_id: str, repo_url: str):
                 "vector_db": result
             }
         })
+        _save_jobs()
 
         print(f"[{job_id}] Job completed successfully")
 
@@ -275,3 +304,4 @@ async def _run_analysis_job(job_id: str, repo_url: str):
                 "status": "error",
                 "error":  str(e)
             })
+            _save_jobs()

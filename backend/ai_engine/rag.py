@@ -8,19 +8,41 @@ from google import genai
 from google.genai import types
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 
+import tempfile
+import pickle
+
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
 if not GEMINI_API_KEY:
     raise RuntimeError("GEMINI_API_KEY is not set")
 
 gemini_client = genai.Client(api_key=GEMINI_API_KEY)
 
-# In-memory repository index for the current server instance.
-# This avoids ChromaDB/local ML dependencies that are too large for Vercel.
+# Repository index with /tmp persistence
 _repo_indexes = {}
+INDEX_FILE = os.path.join(tempfile.gettempdir(), "repomind_indexes.pkl")
+
+def _load_indexes():
+    global _repo_indexes
+    try:
+        if os.path.exists(INDEX_FILE):
+            with open(INDEX_FILE, "rb") as f:
+                _repo_indexes.update(pickle.load(f))
+    except Exception:
+        pass
+
+def _save_indexes():
+    try:
+        with open(INDEX_FILE, "wb") as f:
+            pickle.dump(_repo_indexes, f)
+    except Exception:
+        pass
+
+_load_indexes()
 
 EMBEDDING_MODEL = "gemini-embedding-001"
 EMBEDDING_DIMENSIONS = 768
 EMBED_BATCH_SIZE = 32
+
 
 
 def get_repo_id(repo_url: str) -> str:
@@ -109,6 +131,7 @@ def store_code_in_vector_db(documents, repo_url: str):
             })
 
     _repo_indexes[repo_id] = entries
+    _save_indexes()
 
 
 def index_chunks_stream(chunks, file_name, repo_url):
@@ -130,8 +153,11 @@ def index_chunks_stream(chunks, file_name, repo_url):
                 },
             })
 
+    _save_indexes()
+
 
 def query_repository(question, repo_url):
+    _load_indexes()
     repo_id = get_repo_id(repo_url)
     entries = _repo_indexes.get(repo_id, [])
 

@@ -1,7 +1,7 @@
 import axios from "axios";
 
 const API = axios.create({
-  baseURL: "https://repo-mind-ai-pdyq.vercel.app",
+  baseURL: import.meta.env.VITE_API_BASE_URL || "https://repo-mind-ai-pdyq.vercel.app",
 });
 
 export default API;
@@ -17,7 +17,7 @@ export function pollStatus(jobId, onProgress, intervalMs = 2000) {
   return new Promise((resolve, reject) => {
     const timer = setInterval(async () => {
       try {
-        const res = await API.get(/status/);
+        const res = await API.get(`/status/${jobId}`);
         const data = res.data;
 
         onProgress(data.status, data.progress ?? 0);
@@ -45,7 +45,7 @@ export function pollStatus(jobId, onProgress, intervalMs = 2000) {
 }
 
 export async function cancelAnalysis(jobId) {
-  const res = await API.post(/cancel/);
+  const res = await API.post(`/cancel/${jobId}`);
   return res.data;
 }
 
@@ -55,3 +55,4 @@ export async function askAI(question, repoUrl) {
   });
   return res.data;
 }
+
