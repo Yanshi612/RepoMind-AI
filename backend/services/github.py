@@ -7,10 +7,11 @@ import zipfile
 
 import requests
 
-
-# ============================================================
-# Repository Size Gate
-# ============================================================
+GITHUB_HEADERS = {
+    "Accept": "application/vnd.github+json",
+    "User-Agent": "RepoMindAI/1.0",
+    "X-GitHub-Api-Version": "2022-11-28",
+}
 
 MAX_REPO_SIZE_MB = 500
 
@@ -35,30 +36,16 @@ def _parse_repo(repo_url: str):
 def check_repo_size(repo_url: str) -> int:
     """
     Fetch repository size from GitHub API.
-
     Returns repository size in KB.
-    Raises ValueError when repository exceeds MAX_REPO_SIZE_MB.
     """
-
     owner, repo = _parse_repo(repo_url)
-
     api_url = f"https://api.github.com/repos/{owner}/{repo}"
 
     try:
-        response = requests.get(
-            api_url,
-            headers={
-                "Accept": "application/vnd.github+json",
-                "X-GitHub-Api-Version": "2026-03-10",
-            },
-            timeout=10,
-        )
+        response = requests.get(api_url, headers=GITHUB_HEADERS, timeout=10)
 
         if response.status_code != 200:
-            print(
-                f"SIZE CHECK: GitHub API returned "
-                f"{response.status_code}, skipping size gate."
-            )
+            print(f"SIZE CHECK: GitHub API returned {response.status_code}, skipping size gate.")
             return 0
 
         data = response.json()
@@ -77,36 +64,16 @@ def check_repo_size(repo_url: str) -> int:
 
     except ValueError:
         raise
-
     except Exception as e:
         print(f"SIZE CHECK: Could not determine repo size: {e}")
         return 0
 
 
-# ============================================================
-# Repository Details
-# ============================================================
-
 def get_repository_details(repo_url: str) -> dict:
-    """
-    Fetch basic repository metadata from GitHub API.
-    """
-
     owner, repo = _parse_repo(repo_url)
-
     api_url = f"https://api.github.com/repos/{owner}/{repo}"
 
-    response = requests.get(
-        api_url,
-        headers={
-            "Accept": "application/vnd.github+json",
-            "X-GitHub-Api-Version": "2026-03-10",
-        },
-        timeout=15,
-    )
-
-    print(f"GitHub API URL: {api_url}")
-    print(f"Status: {response.status_code}")
+    response = requests.get(api_url, headers=GITHUB_HEADERS, timeout=15)
 
     if response.status_code != 200:
         return {"error": "Repository not found"}
@@ -122,15 +89,7 @@ def get_repository_details(repo_url: str) -> dict:
     }
 
 
-# ============================================================
-# Windows read-only file handler
-# ============================================================
-
 def remove_readonly(func, path, excinfo):
-    """
-    Error handler for shutil.rmtree on Windows.
-    """
-
     try:
         os.chmod(path, stat.S_IWRITE)
         func(path)
@@ -138,21 +97,11 @@ def remove_readonly(func, path, excinfo):
         pass
 
 
-# ============================================================
-# Safe ZIP extraction
-# ============================================================
-
 def _safe_extract(zip_file: zipfile.ZipFile, destination: str):
-    """
-    Extract ZIP while preventing path traversal.
-    """
-
     destination = os.path.abspath(destination)
 
     for member in zip_file.infolist():
-        target = os.path.abspath(
-            os.path.join(destination, member.filename)
-        )
+        target = os.path.abspath(os.path.join(destination, member.filename))
 
         if not target.startswith(destination + os.sep):
             raise ValueError("Unsafe path found in repository archive")
@@ -160,113 +109,73 @@ def _safe_extract(zip_file: zipfile.ZipFile, destination: str):
     zip_file.extractall(destination)
 
 
-# ============================================================
-# Download + Extract Repository
-# ============================================================
-
 def clone_repository(repo_url: str) -> str:
     """
     Downloads a GitHub repository as a ZIP archive and extracts it
     into the writable temporary directory used by Vercel.
-
-    Returns the local path to the extracted repository.
     """
 
     owner, repo_name = _parse_repo(repo_url)
 
-    clones_dir = os.path.join(
-        tempfile.gettempdir(),
-        "repomind_cloned_repos",
-    )
-
+    clones_dir = os.path.join(tempfile.gettempdir(), "repomind_cloned_repos")
     os.makedirs(clones_dir, exist_ok=True)
 
     clean_url = repo_url.rstrip("/")
-
     if clean_url.endswith(".git"):
         clean_url = clean_url[:-4]
 
-    url_hash = hashlib.md5(
-        clean_url.encode()
-    ).hexdigest()[:8]
+    url_hash = hashlib.md5(clean_url.encode()).hexdigest()[:8]
 
-    folder = os.path.join(
-        clones_dir,
-        f"{repo_name}_{url_hash}",
-    )
+    folder = os.path.join(clones_dir, f"{repo_name}_{url_hash}")
 
-    # Reuse an already extracted repository in this invocation.
     if os.path.isdir(folder):
         print(f"Repository already available: {folder}")
         return folder
 
-    api_url = f"https://api.github.com/repos/{owner}/{repo_name}"
-
-    response = requests.get(
-        api_url,
-        headers={
-            "Accept": "application/vnd.github+json",
-            "X-GitHub-Api-Version": "2026-03-10",
-        },
-        timeout=15,
-    )
-
-    if response.status_code != 200:
-        raise ValueError(
-            f"GitHub repository could not be accessed "
-            f"(HTTP {response.status_code})"
-        )
-
-    data = response.json()
-    default_branch = data.get("default_branch", "main")
-
-    print(f"GitHub default branch: {default_branch}")
-
-    zip_url = (
-        f"https://api.github.com/repos/"
-        f"{owner}/{repo_name}/zipball/{default_branch}"
-    )
-
-    archive_path = os.path.join(
-        clones_dir,
-        f"{repo_name}_{url_hash}.zip",
-    )
-
-    extract_dir = os.path.join(
-        clones_dir,
-        f"{repo_name}_{url_hash}_extract",
-    )
-
-    print(f"Downloading repository archive: {repo_url}")
+    candidate_zip_urls = [
+        f"https://codeload.github.com/{owner}/{repo_name}/zip/refs/heads/main",
+        f"https://codeload.github.com/{owner}/{repo_name}/zip/refs/heads/master",
+        f"https://api.github.com/repos/{owner}/{repo_name}/zipball",
+    ]
 
     try:
-        shutil.rmtree(extract_dir, ignore_errors=True)
-        shutil.rmtree(folder, ignore_errors=True)
+        api_url = f"https://api.github.com/repos/{owner}/{repo_name}"
+        res = requests.get(api_url, headers=GITHUB_HEADERS, timeout=10)
+        if res.status_code == 200:
+            branch = res.json().get("default_branch")
+            if branch:
+                candidate_zip_urls.insert(0, f"https://codeload.github.com/{owner}/{repo_name}/zip/refs/heads/{branch}")
+                candidate_zip_urls.insert(1, f"https://api.github.com/repos/{owner}/{repo_name}/zipball/{branch}")
+    except Exception as e:
+        print(f"GitHub default branch lookup skipped: {e}")
 
-        with requests.get(
-            zip_url,
-            headers={
-                "Accept": "application/vnd.github+json",
-                "X-GitHub-Api-Version": "2026-03-10",
-            },
-            stream=True,
-            timeout=60,
-            allow_redirects=True,
-        ) as response:
+    archive_path = os.path.join(clones_dir, f"{repo_name}_{url_hash}.zip")
+    extract_dir  = os.path.join(clones_dir, f"{repo_name}_{url_hash}_extract")
 
-            if response.status_code != 200:
-                raise ValueError(
-                    f"Repository archive download failed "
-                    f"(HTTP {response.status_code})"
-                )
+    print(f"Downloading repository archive for {owner}/{repo_name}...")
 
-            with open(archive_path, "wb") as archive:
-                for chunk in response.iter_content(
-                    chunk_size=1024 * 1024
-                ):
-                    if chunk:
-                        archive.write(chunk)
+    downloaded = False
+    for zip_url in candidate_zip_urls:
+        try:
+            shutil.rmtree(extract_dir, ignore_errors=True)
+            shutil.rmtree(folder, ignore_errors=True)
 
+            with requests.get(zip_url, headers=GITHUB_HEADERS, stream=True, timeout=30, allow_redirects=True) as response:
+                if response.status_code == 200:
+                    with open(archive_path, "wb") as archive:
+                        for chunk in response.iter_content(chunk_size=1024 * 1024):
+                            if chunk:
+                                archive.write(chunk)
+                    downloaded = True
+                    print(f"Downloaded repository archive from: {zip_url}")
+                    break
+        except Exception as err:
+            print(f"Failed download attempt from {zip_url}: {err}")
+
+    if not downloaded or not os.path.exists(archive_path):
+        raise ValueError(f"Could not download repository archive for '{owner}/{repo_name}'. Please verify the URL.")
+
+    try:
         os.makedirs(extract_dir, exist_ok=True)
 
         with zipfile.ZipFile(archive_path, "r") as zip_file:
@@ -277,16 +186,12 @@ def clone_repository(repo_url: str) -> str:
             for name in os.listdir(extract_dir)
         ]
 
-        # GitHub normally places everything inside one top-level folder.
         if len(entries) == 1 and os.path.isdir(entries[0]):
-            extracted_root = entries[0]
-            shutil.move(extracted_root, folder)
+            shutil.move(entries[0], folder)
         else:
-            # Fallback for archives without a single top-level folder.
             shutil.move(extract_dir, folder)
 
-        print(f"Repository downloaded successfully: {folder}")
-
+        print(f"Repository extracted successfully: {folder}")
         return folder
 
     finally:
@@ -296,7 +201,5 @@ def clone_repository(repo_url: str) -> str:
         except Exception:
             pass
 
-        # Only remove the temporary extraction directory if it still exists.
         if os.path.isdir(extract_dir):
             shutil.rmtree(extract_dir, ignore_errors=True)
-
