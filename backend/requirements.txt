@@ -1,9 +1,6 @@
 fastapi
-uvicorn[standard]
 requests
 gitpython
-chromadb
-sentence-transformers
 langchain-text-splitters
 python-dotenv
-google-generativeai
+google-genai

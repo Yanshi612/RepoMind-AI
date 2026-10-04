@@ -1,323 +1,157 @@
-﻿import os
-import shutil
+import os
 import hashlib
+import math
+from array import array
 
-os.environ.setdefault("OPENBLAS_NUM_THREADS", "1")
-os.environ.setdefault("OMP_NUM_THREADS", "1")
-os.environ.setdefault("MKL_NUM_THREADS", "1")
-os.environ.setdefault("TOKENIZERS_PARALLELISM", "false")
-
-import chromadb
-from sentence_transformers import SentenceTransformer
+from google import genai
+from google.genai import types
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 
+GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
+if not GEMINI_API_KEY:
+    raise RuntimeError("GEMINI_API_KEY is not set")
 
-BASE_DIR = os.path.dirname(
-    os.path.dirname(
-        os.path.abspath(__file__)
-    )
-)
+gemini_client = genai.Client(api_key=GEMINI_API_KEY)
 
-CHROMA_PATH = os.path.join(
-    BASE_DIR,
-    "chroma_db"
-)
+# In-memory repository index for the current server instance.
+# This avoids ChromaDB/local ML dependencies that are too large for Vercel.
+_repo_indexes = {}
 
-client = None
-collection = None
-
-
-def _make_client():
-    return chromadb.PersistentClient(
-        path=CHROMA_PATH
-    )
-
-
-def _make_collection(c):
-    try:
-        return c.get_collection(
-            name="repo_code"
-        )
-    except Exception:
-        return c.create_collection(
-            name="repo_code"
-        )
-
-
-def _init_chroma():
-    global client
-    global collection
-
-    try:
-        client = _make_client()
-        collection = _make_collection(client)
-        collection.count()
-
-    except Exception as e:
-
-        error_text = str(e).lower()
-
-        if (
-            "hnsw" in error_text
-            or "segment" in error_text
-            or "compaction" in error_text
-        ):
-
-            print(
-                f"[rag] ChromaDB index corrupted: {e}"
-            )
-
-            shutil.rmtree(
-                CHROMA_PATH,
-                ignore_errors=True
-            )
-
-            client = _make_client()
-            collection = _make_collection(client)
-
-            print(
-                "[rag] ChromaDB reinitialised successfully."
-            )
-
-        else:
-            raise
-
-
-def get_collection():
-
-    global client
-    global collection
-
-    if collection is None:
-
-        print(
-            "RAG: Initializing ChromaDB..."
-        )
-
-        _init_chroma()
-
-        print(
-            "RAG: ChromaDB ready."
-        )
-
-    return collection
-
-
-_embedding_model = None
-
-
-def get_embedding_model():
-
-    global _embedding_model
-
-    if _embedding_model is None:
-
-        print(
-            "RAG: Loading embedding model..."
-        )
-
-        _embedding_model = SentenceTransformer(
-            "all-MiniLM-L6-v2",
-            device="cpu"
-        )
-
-        print(
-            "RAG: Embedding model ready."
-        )
-
-    return _embedding_model
+EMBEDDING_MODEL = "gemini-embedding-001"
+EMBEDDING_DIMENSIONS = 768
+EMBED_BATCH_SIZE = 16
 
 
 def get_repo_id(repo_url: str) -> str:
-
-    return hashlib.md5(
-        repo_url.rstrip("/").encode()
-    ).hexdigest()[:12]
+    return hashlib.md5(repo_url.rstrip("/").encode()).hexdigest()[:12]
 
 
-def index_chunks_stream(
-    chunks: list[str],
-    file_name: str,
-    repo_url: str
-) -> None:
-
-    repo_id = get_repo_id(repo_url)
-
-    model = get_embedding_model()
-
-    db_collection = get_collection()
-
-    EMBEDDING_BATCH_SIZE = 16
-
-    for start in range(
-        0,
-        len(chunks),
-        EMBEDDING_BATCH_SIZE
-    ):
-
-        batch = chunks[
-            start:start + EMBEDDING_BATCH_SIZE
-        ]
-
-        if not batch:
-            continue
-
-        vectors = model.encode(
-            batch,
-            batch_size=8,
-            show_progress_bar=False
-        )
-
-        ids = [
-            f"{repo_id}_"
-            f"{hashlib.md5(
-                f'{file_name}_{start + i}'.encode()
-            ).hexdigest()[:10]}"
-            for i in range(
-                len(batch)
-            )
-        ]
-
-        embeddings = [
-            vector.tolist()
-            for vector in vectors
-        ]
-
-        metadatas = [
-            {
-                "repo_id": repo_id,
-                "file": file_name
-            }
-            for _ in batch
-        ]
-
-        db_collection.upsert(
-            ids=ids,
-            documents=batch,
-            embeddings=embeddings,
-            metadatas=metadatas
-        )
-
-        del vectors
-        del embeddings
-
-
-def store_code_in_vector_db(
-    documents: list[dict],
-    repo_url: str
-) -> dict:
-
-    repo_id = get_repo_id(repo_url)
-
-    print(
-        f"Repository ID: {repo_id}"
+def _embed_documents(texts):
+    result = gemini_client.models.embed_content(
+        model=EMBEDDING_MODEL,
+        contents=texts,
+        config=types.EmbedContentConfig(
+            task_type="RETRIEVAL_DOCUMENT",
+            output_dimensionality=EMBEDDING_DIMENSIONS,
+        ),
     )
+    return [array("f", e.values) for e in result.embeddings]
 
-    db_collection = get_collection()
 
-    try:
+def _embed_query(text):
+    result = gemini_client.models.embed_content(
+        model=EMBEDDING_MODEL,
+        contents=text,
+        config=types.EmbedContentConfig(
+            task_type="RETRIEVAL_QUERY",
+            output_dimensionality=EMBEDDING_DIMENSIONS,
+        ),
+    )
+    return array("f", result.embeddings[0].values)
 
-        db_collection.delete(
-            where={
-                "repo_id": repo_id
-            }
-        )
 
-        print(
-            "Old repository vectors removed."
-        )
+def _cosine_similarity(a, b):
+    dot = 0.0
+    norm_a = 0.0
+    norm_b = 0.0
 
-    except Exception as e:
+    for x, y in zip(a, b):
+        dot += x * y
+        norm_a += x * x
+        norm_b += y * y
 
-        print(
-            f"No old vectors to remove: {e}"
-        )
+    if norm_a == 0.0 or norm_b == 0.0:
+        return 0.0
+
+    return dot / (math.sqrt(norm_a) * math.sqrt(norm_b))
+
+
+def store_code_in_vector_db(documents, repo_url: str):
+    repo_id = get_repo_id(repo_url)
 
     splitter = RecursiveCharacterTextSplitter(
         chunk_size=500,
-        chunk_overlap=50
+        chunk_overlap=50,
     )
 
-    total_chunks = 0
+    chunks = []
+    metadata = []
 
     for doc in documents:
+        file_chunks = splitter.split_text(doc["content"])
 
-        chunks = splitter.split_text(
-            doc["content"]
-        )
+        for chunk in file_chunks:
+            if chunk.strip():
+                chunks.append(chunk)
+                metadata.append({
+                    "file_name": doc["file_name"],
+                    "repo_id": repo_id,
+                })
 
-        if chunks:
+    if not chunks:
+        _repo_indexes[repo_id] = []
+        return
 
-            index_chunks_stream(
-                chunks,
-                doc["file_name"],
-                repo_url
-            )
+    entries = []
 
-            total_chunks += len(chunks)
+    for start in range(0, len(chunks), EMBED_BATCH_SIZE):
+        batch_chunks = chunks[start:start + EMBED_BATCH_SIZE]
+        batch_vectors = _embed_documents(batch_chunks)
 
-    if total_chunks == 0:
+        for i, vector in enumerate(batch_vectors):
+            entries.append({
+                "text": batch_chunks[i],
+                "embedding": vector,
+                "metadata": metadata[start + i],
+            })
 
-        return {
-            "message": "No code files found.",
-            "chunks": 0,
-            "repo_id": repo_id
-        }
-
-    print(
-        "Repository stored successfully."
-    )
-
-    return {
-        "message": "Code stored successfully",
-        "chunks": total_chunks,
-        "repo_id": repo_id
-    }
+    _repo_indexes[repo_id] = entries
 
 
-def query_repository(
-    question: str,
-    repo_url: str
-) -> dict:
-
+def index_chunks_stream(chunks, file_name, repo_url):
     repo_id = get_repo_id(repo_url)
 
-    model = get_embedding_model()
+    existing = _repo_indexes.setdefault(repo_id, [])
 
-    db_collection = get_collection()
+    for start in range(0, len(chunks), EMBED_BATCH_SIZE):
+        batch_chunks = chunks[start:start + EMBED_BATCH_SIZE]
+        batch_vectors = _embed_documents(batch_chunks)
 
-    print(
-        f"RAG: Searching repository {repo_id}"
-    )
+        for i, vector in enumerate(batch_vectors):
+            existing.append({
+                "text": batch_chunks[i],
+                "embedding": vector,
+                "metadata": {
+                    "file_name": file_name,
+                    "repo_id": repo_id,
+                },
+            })
 
-    print(
-        f"RAG: Question: {question}"
-    )
 
-    question_embedding = (
-        model
-        .encode(question)
-        .tolist()
-    )
+def query_repository(question, repo_url):
+    repo_id = get_repo_id(repo_url)
+    entries = _repo_indexes.get(repo_id, [])
 
-    results = db_collection.query(
-        query_embeddings=[
-            question_embedding
-        ],
-        n_results=5,
-        where={
-            "repo_id": repo_id
+    if not entries:
+        return {
+            "documents": [[]],
+            "metadatas": [[]],
+            "distances": [[]],
         }
-    )
 
-    print(
-        "RAG: Relevant chunks found:",
-        len(
-            results.get(
-                "documents",
-                [[]]
-            )[0]
-        )
-    )
+    query_vector = _embed_query(question)
 
-    return results
+    scored = []
+
+    for entry in entries:
+        score = _cosine_similarity(query_vector, entry["embedding"])
+        scored.append((score, entry))
+
+    scored.sort(key=lambda x: x[0], reverse=True)
+    top = scored[:5]
+
+    return {
+        "documents": [[item[1]["text"] for item in top]],
+        "metadatas": [[item[1]["metadata"] for item in top]],
+        "distances": [[1.0 - item[0] for item in top]],
+    }
