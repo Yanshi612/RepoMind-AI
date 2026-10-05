@@ -173,11 +173,8 @@ async def cancel_job(job_id: str):
 @router.post("/ask")
 async def ask(question: str, repo_url: str):
     """
-    Ask a question about an already-indexed repository.
-    Both 'question' and 'repo_url' are required.
-
-    FIX: repo_url was missing in the original implementation,
-    causing query_repository() to crash with a missing argument.
+    Ask a question about an indexed repository.
+    Handles serverless container state loss by auto-indexing on cache miss.
     """
 
     if not question or not question.strip():
@@ -193,18 +190,33 @@ async def ask(question: str, repo_url: str):
         )
 
     try:
-
-        results = query_repository(question, repo_url)   # FIXED: pass repo_url
-
+        results = query_repository(question, repo_url)
         documents = results.get("documents", [])
 
+        # Serverless cache miss: auto-index repository on-demand if index not present in container
         if not documents or not documents[0]:
-            return {
-                "question": question,
-                "answer":   "No relevant code found in the indexed repository."
+            print(f"[/ask] Cache miss for {repo_url}. Performing instant on-demand repository indexing...")
+            job_id = f"auto_{str(uuid.uuid4())[:8]}"
+            jobs[job_id] = {
+                "status": "queued",
+                "progress": 0,
+                "repo_url": repo_url,
+                "error": None,
+                "result": None
             }
+            _save_jobs()
+            try:
+                await _run_analysis_job(job_id, repo_url)
+            except Exception as auto_err:
+                print(f"[/ask] On-demand indexing notice: {auto_err}")
 
-        code_context = "\n\n".join(documents[0])
+            results = query_repository(question, repo_url)
+            documents = results.get("documents", [])
+
+        if not documents or not documents[0]:
+            code_context = f"Repository URL: {repo_url}\nNo specific code snippets matched."
+        else:
+            code_context = "\n\n".join(documents[0])
 
         answer = explain_code(question, code_context)
 

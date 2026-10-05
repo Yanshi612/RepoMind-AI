@@ -85,9 +85,10 @@ Answer clearly and in detail. Mention file names and code lines where relevant."
     # ── Code Context Fallback if all models rate-limited / unavailable ────
     if code_context and code_context.strip():
         return (
-            "### 💡 Relevant Codebase Context\n\n"
+            f"### 🔍 Codebase Search Results for: \"{question}\"\n\n"
+            f"Here are the relevant code snippets retrieved from your repository:\n\n"
             f"{code_context}\n\n"
-            "*(Note: Gemini AI model server capacity was temporarily busy/unavailable, but the code snippets above were retrieved directly from your repository for your question.)*"
+            "*(Note: Gemini LLM text generation model was temporarily busy, so the matching code snippets from your repository are displayed above.)*"
         )
 
     return f"Gemini API model temporarily unavailable: {last_error}. Please try asking again in a few seconds."
