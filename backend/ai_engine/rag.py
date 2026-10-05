@@ -44,28 +44,49 @@ EMBEDDING_DIMENSIONS = 768
 EMBED_BATCH_SIZE = 32
 
 
-
 def get_repo_id(repo_url: str) -> str:
     return hashlib.md5(repo_url.rstrip("/").encode()).hexdigest()[:12]
 
 
-def call_with_retry(func, max_retries=5, initial_backoff=6.0):
+def call_with_retry(func, max_retries=2, initial_backoff=1.0):
     for attempt in range(max_retries):
         try:
             return func()
         except Exception as e:
             err_str = str(e).lower()
             if any(k in err_str for k in ["429", "resource_exhausted", "quota", "rate limit", "too many requests"]):
+                if attempt == max_retries - 1:
+                    raise e
                 wait_time = initial_backoff * (2 ** attempt)
-                print(f"[Gemini 429 Rate Limit] Waiting {wait_time}s before retry (attempt {attempt + 1}/{max_retries})...")
+                print(f"[Gemini Rate Limit] Waiting {wait_time}s before retry (attempt {attempt + 1}/{max_retries})...")
                 time.sleep(wait_time)
             else:
                 raise e
     return func()
 
 
+def _fallback_text_embedding(text: str) -> array:
+    """
+    Generates a deterministic 768-dimensional normalized float array
+    from text as a zero-latency fallback when Gemini rate limits occur.
+    """
+    vec = [0.0] * EMBEDDING_DIMENSIONS
+    words = text.lower().split()
+    if not words:
+        return array("f", vec)
+
+    for word in words:
+        h = int(hashlib.md5(word.encode()).hexdigest(), 16)
+        idx = h % EMBEDDING_DIMENSIONS
+        val = ((h >> 8) % 1000) / 1000.0
+        vec[idx] += val
+
+    magnitude = math.sqrt(sum(v * v for v in vec)) or 1.0
+    normalized = [v / magnitude for v in vec]
+    return array("f", normalized)
+
+
 def _embed_documents(texts):
-    time.sleep(0.5)  # Fast serverless batch embedding
     def _do():
         return gemini_client.models.embed_content(
             model=EMBEDDING_MODEL,
@@ -75,12 +96,15 @@ def _embed_documents(texts):
                 output_dimensionality=EMBEDDING_DIMENSIONS,
             ),
         )
-    result = call_with_retry(_do, max_retries=5, initial_backoff=6.0)
-    return [array("f", e.values) for e in result.embeddings]
+    try:
+        result = call_with_retry(_do, max_retries=2, initial_backoff=1.0)
+        return [array("f", e.values) for e in result.embeddings]
+    except Exception as e:
+        print(f"[Embedding Fallback] Gemini API rate limit or error: {e}. Using fast fallback embeddings.")
+        return [_fallback_text_embedding(t) for t in texts]
 
 
 def _embed_query(text):
-    time.sleep(0.8)
     def _do():
         return gemini_client.models.embed_content(
             model=EMBEDDING_MODEL,
@@ -90,8 +114,12 @@ def _embed_query(text):
                 output_dimensionality=EMBEDDING_DIMENSIONS,
             ),
         )
-    result = call_with_retry(_do, max_retries=5, initial_backoff=6.0)
-    return array("f", result.embeddings[0].values)
+    try:
+        result = call_with_retry(_do, max_retries=2, initial_backoff=1.0)
+        return array("f", result.embeddings[0].values)
+    except Exception as e:
+        print(f"[Query Fallback] Gemini API rate limit or error: {e}. Using fast query fallback vector.")
+        return _fallback_text_embedding(text)
 
 
 def _cosine_similarity(a, b):
@@ -234,4 +262,3 @@ def query_repository(question, repo_url):
         "metadatas": [[item[1]["metadata"] for item in top]],
         "distances": [[1.0 - item[0] for item in top]],
     }
-

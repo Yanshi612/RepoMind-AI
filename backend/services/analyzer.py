@@ -293,8 +293,19 @@ def analyze_repository(path: str) -> dict:
     }
 
 
+def _file_priority(rel_path: str) -> int:
+    lower = rel_path.lower()
+    base = os.path.basename(lower)
+    if base.startswith("readme") or base in {"package.json", "requirements.txt", "main.py", "index.js", "app.jsx", "app.tsx", "dockerfile"}:
+        return 0
+    if "/" not in rel_path and "\\" not in rel_path:
+        return 1
+    depth = rel_path.count("/") + rel_path.count("\\")
+    return 2 + depth
+
+
 # ============================================================
-# Streaming Index Pipeline (Fix 2 + Fix 4)
+# Streaming Index Pipeline
 # ============================================================
 
 def stream_and_index(
@@ -306,8 +317,8 @@ def stream_and_index(
     """
     Streaming pipeline: read one file → split → embed → store → repeat.
 
-    Memory footprint is bounded to ONE file's chunks at a time.
-    Progress is written back to the jobs dict so /status can report it.
+    Bounded to MAX_TOTAL_CHUNKS (64 chunks = 2 Gemini embedding batches)
+    to prevent Gemini API 429 RESOURCE_EXHAUSTED free tier rate limits.
     """
 
     from ai_engine.rag import index_batched_chunks
@@ -320,7 +331,11 @@ def stream_and_index(
 
     print("EXTRACTOR: Starting streaming extraction")
 
+    MAX_TOTAL_CHUNKS = 64
+
     all_files = list(_walk_code_files(repo_path))
+    all_files.sort(key=lambda item: _file_priority(item[1]))
+
     total     = max(len(all_files), 1)
     processed = 0
 
@@ -328,6 +343,9 @@ def stream_and_index(
     all_metadatas = []
 
     for abs_path, rel_path in all_files:
+        if len(all_chunks) >= MAX_TOTAL_CHUNKS:
+            break
+
         if not is_processable_file(rel_path, abs_path):
             processed += 1
             continue
@@ -342,6 +360,8 @@ def stream_and_index(
             if c.strip():
                 all_chunks.append(c)
                 all_metadatas.append({"file_name": rel_path})
+                if len(all_chunks) >= MAX_TOTAL_CHUNKS:
+                    break
 
         processed += 1
         jobs[job_id]["progress"] = int(processed / total * 50)
