@@ -65,7 +65,7 @@ def call_with_retry(func, max_retries=5, initial_backoff=6.0):
 
 
 def _embed_documents(texts):
-    time.sleep(4.0)
+    time.sleep(0.5)  # Fast serverless batch embedding
     def _do():
         return gemini_client.models.embed_content(
             model=EMBEDDING_MODEL,

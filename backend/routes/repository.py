@@ -43,14 +43,14 @@ _load_jobs()
 
 
 # ==================================================
-# POST /analyze  — returns instantly with a job_id
+# POST /analyze  — runs analysis and returns result
 # ==================================================
 
 @router.post("/analyze")
 async def analyze(repo_url: str):
     """
-    Accepts a GitHub repository URL and immediately returns a job_id.
-    The job is processed upon the first GET /status/{job_id} poll.
+    Accepts a GitHub repository URL, runs analysis synchronously,
+    and returns the completed analysis result.
     """
 
     if not repo_url or not repo_url.startswith("http"):
@@ -70,10 +70,27 @@ async def analyze(repo_url: str):
     }
     _save_jobs()
 
+    try:
+        await _run_analysis_job(job_id, repo_url)
+    except Exception as e:
+        _load_jobs()
+        job = jobs.get(job_id, {})
+        err_msg = job.get("error") or str(e) or "Analysis failed."
+        status_code = 400 if ("Invalid" in err_msg or "too large" in err_msg or "verify the URL" in err_msg) else 500
+        raise HTTPException(status_code=status_code, detail=err_msg)
+
+    _load_jobs()
+    job = jobs.get(job_id, {})
+    if job.get("status") == "error":
+        err_msg = job.get("error") or "Analysis failed."
+        raise HTTPException(status_code=500, detail=err_msg)
+
     return {
-        "job_id":  job_id,
-        "status":  "queued",
-        "message": "Repository analysis started. Poll /status/{job_id} for progress."
+        "job_id":   job_id,
+        "status":   "done",
+        "progress": 100,
+        "result":   job.get("result"),
+        "message":  "Repository analyzed successfully."
     }
 
 
@@ -85,16 +102,19 @@ async def analyze(repo_url: str):
 async def get_status(job_id: str):
     """
     Returns the current status and progress of an analysis job.
-    Advances queued jobs on Vercel Serverless.
     """
 
     _load_jobs()
 
     if job_id not in jobs:
-        raise HTTPException(
-            status_code=404,
-            detail=f"Job '{job_id}' not found."
-        )
+        return {
+            "job_id":   job_id,
+            "status":   "done",
+            "progress": 100,
+            "error":    None,
+            "result":   None,
+            "message":  "Job completed or status unavailable."
+        }
 
     job = jobs[job_id]
 
@@ -298,3 +318,4 @@ async def _run_analysis_job(job_id: str, repo_url: str):
             "error":  err_msg
         })
         _save_jobs()
+        raise e

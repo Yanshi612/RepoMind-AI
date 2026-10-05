@@ -43,7 +43,8 @@ export function pollStatus(jobId, onProgress, intervalMs = 2000) {
         }
       } catch (err) {
         if (timer) clearInterval(timer);
-        reject(err);
+        const detail = err.response?.data?.detail || err.message || "Analysis failed.";
+        reject(new Error(detail));
         return true;
       }
       return false;

@@ -52,48 +52,87 @@ function Repository() {
   /* ── Start analysis ─────────────────────────────────────── */
   const handleAnalyze = async () => {
     const url = repoUrl.trim();
-    if (!url)                       return setError("Please enter a GitHub repository URL.");
-    if (!url.startsWith("http"))    return setError("URL must start with https://");
+    if (!url)                    return setError("Please enter a GitHub repository URL.");
+    if (!url.startsWith("http")) return setError("URL must start with https://");
 
     setError(null);
     setResult(null);
-    setProgress(0);
-    setJobStatus("queued");
+    setProgress(5);
+    setJobStatus("size_check");
     setIsRunning(true);
     setJobId(null);
 
-    try {
-      const { job_id } = await startAnalysis(url);
-      setJobId(job_id);
-
-      const finalResult = await pollStatus(job_id, (status, pct) => {
-        setJobStatus(status);
-        setProgress(pct);
-        if (status === "cancelled") {
-          setIsRunning(false);
+    // Simulated smooth progress update while waiting for backend response
+    const fakeProgressTimer = setInterval(() => {
+      setProgress((prev) => {
+        if (prev < 20) {
+          setJobStatus("size_check");
+          return prev + 5;
+        } else if (prev < 45) {
+          setJobStatus("cloning");
+          return prev + 4;
+        } else if (prev < 65) {
+          setJobStatus("analyzing");
+          return prev + 3;
+        } else if (prev < 90) {
+          setJobStatus("indexing");
+          return prev + 2;
         }
+        return prev;
       });
+    }, 400);
 
-      const payload = { ...finalResult, repo_url: url, scanned_at: new Date().toISOString() };
+    try {
+      const responseData = await startAnalysis(url);
+      clearInterval(fakeProgressTimer);
+
+      if (responseData?.job_id) {
+        setJobId(responseData.job_id);
+      }
+
+      let finalResult = responseData?.result;
+
+      // If backend returned queued instead of done, fallback to polling
+      if (responseData?.status !== "done" && responseData?.job_id) {
+        finalResult = await pollStatus(responseData.job_id, (status, pct) => {
+          setJobStatus(status);
+          setProgress(pct);
+          if (status === "cancelled") {
+            setIsRunning(false);
+          }
+        });
+      }
+
+      if (!finalResult) {
+        throw new Error("No analysis data returned from backend.");
+      }
+
+      const payload = {
+        ...finalResult,
+        repo_url: url,
+        scanned_at: new Date().toISOString(),
+      };
+
       localStorage.setItem("repositoryAnalysis", JSON.stringify(payload));
 
-      // ── Append to recent scans history (keep last 20) ──
       try {
         const prev = JSON.parse(localStorage.getItem("recentScans") || "[]");
-        // Remove duplicate of same URL if it already exists
-        const deduped = prev.filter(s => s.repo_url !== url);
+        const deduped = prev.filter((s) => s.repo_url !== url);
         deduped.push(payload);
         localStorage.setItem("recentScans", JSON.stringify(deduped.slice(-20)));
-      } catch { /* ignore */ }
+      } catch {
+        /* ignore */
+      }
 
       setResult(payload);
       setJobStatus("done");
       setProgress(100);
     } catch (err) {
-      if (jobStatus !== "cancelled") {
-        setError(err.message || "Analysis failed.");
-        setJobStatus("error");
-      }
+      clearInterval(fakeProgressTimer);
+      const errMsg =
+        err.response?.data?.detail || err.message || "Analysis failed.";
+      setError(errMsg);
+      setJobStatus("error");
     } finally {
       setIsRunning(false);
     }
