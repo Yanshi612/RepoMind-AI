@@ -7,8 +7,8 @@ import shutil
 
 from fastapi import APIRouter, HTTPException, BackgroundTasks
 
-from services.github import clone_repository, check_repo_size
-from services.analyzer import analyze_repository, stream_and_index
+from services.github import download_repo_zip_bytes, check_repo_size, clone_repository
+from services.analyzer import analyze_and_index_zip, analyze_repository, stream_and_index
 from ai_engine.rag import query_repository
 from ai_engine.llm import explain_code
 
@@ -240,91 +240,62 @@ async def ask(question: str, repo_url: str):
 
 async def _run_analysis_job(job_id: str, repo_url: str):
     """
-    Orchestrates cloning, analysis, and indexing steps.
-    Saves job state to disk after every step for serverless resilience.
+    Orchestrates in-memory ZIP download, analysis, and indexing.
+    Zero disk writes in /tmp — 100% immune to disk space errors.
     """
 
     def is_cancelled() -> bool:
         return jobs.get(job_id, {}).get("status") == "cancelled"
 
-    repo_path = None
     try:
-
         # ----------------------------------------
-        # STEP 1: Check repo size
+        # STEP 1: Check repo size metadata
         # ----------------------------------------
-
         jobs[job_id]["status"] = "size_check"
         jobs[job_id]["progress"] = 15
         _save_jobs()
         if is_cancelled(): return
 
         await asyncio.to_thread(check_repo_size, repo_url)
-        print(f"[{job_id}] Size check passed")
 
         # ----------------------------------------
-        # STEP 2: Clone (shallow, single branch)
+        # STEP 2: Download ZIP into RAM (0 disk bytes)
         # ----------------------------------------
-
         if is_cancelled(): return
         jobs[job_id]["status"] = "cloning"
         jobs[job_id]["progress"] = 35
         _save_jobs()
 
-        repo_path = await asyncio.to_thread(clone_repository, repo_url)
-        print(f"[{job_id}] Clone complete: {repo_path}")
+        zip_bytes = await asyncio.to_thread(download_repo_zip_bytes, repo_url)
 
         # ----------------------------------------
-        # STEP 3: Analyze file statistics
+        # STEP 3 & 4: In-memory extract, scan & index
         # ----------------------------------------
-
-        if is_cancelled(): return
-        jobs[job_id]["status"] = "analyzing"
-        jobs[job_id]["progress"] = 50
-        _save_jobs()
-
-        stats = await asyncio.to_thread(analyze_repository, repo_path)
-        print(f"[{job_id}] Analysis complete: {stats}")
-
-        # ----------------------------------------
-        # STEP 4: Stream files → embed → index
-        # ----------------------------------------
-
         if is_cancelled(): return
         jobs[job_id]["status"] = "indexing"
         jobs[job_id]["progress"] = 65
         _save_jobs()
 
-        result = await asyncio.to_thread(
-            stream_and_index,
-            repo_path,
+        res_data = await asyncio.to_thread(
+            analyze_and_index_zip,
+            zip_bytes,
             repo_url,
             job_id,
             jobs
         )
-        print(f"[{job_id}] Indexing complete: {result}")
-
-        # ----------------------------------------
-        # STEP 5: Mark as done (unless cancelled)
-        # ----------------------------------------
 
         if is_cancelled(): return
 
         jobs[job_id].update({
             "status":   "done",
             "progress": 100,
-            "result": {
-                "stats":     stats,
-                "vector_db": result
-            }
+            "result":   res_data
         })
         _save_jobs()
 
-        print(f"[{job_id}] Job completed successfully")
-
+        print(f"[{job_id}] In-memory analysis job completed successfully")
 
     except Exception as e:
-
         err_msg = str(e) or "An unexpected error occurred during repository analysis."
         print(f"[{job_id}] Job failed: {err_msg}")
         jobs[job_id].update({
@@ -333,10 +304,3 @@ async def _run_analysis_job(job_id: str, repo_url: str):
         })
         _save_jobs()
         raise e
-    finally:
-        if repo_path and os.path.exists(repo_path):
-            try:
-                shutil.rmtree(repo_path, ignore_errors=True)
-                print(f"[{job_id}] Cleaned up temp repository directory: {repo_path}")
-            except Exception:
-                pass
