@@ -36,7 +36,7 @@ def _parse_repo(repo_url: str):
 def check_repo_size(repo_url: str) -> int:
     """
     Fetch repository size from GitHub API.
-    Returns repository size in KB.
+    Returns repository size in KB. Logs warning for large repos.
     """
     owner, repo = _parse_repo(repo_url)
     api_url = f"https://api.github.com/repos/{owner}/{repo}"
@@ -52,18 +52,13 @@ def check_repo_size(repo_url: str) -> int:
         size_kb = int(data.get("size", 0))
         size_mb = size_kb // 1024
 
-        print(f"SIZE CHECK: Repository is ~{size_mb} MB")
+        print(f"SIZE CHECK: Repository total size is ~{size_mb} MB")
 
-        if size_kb > MAX_REPO_SIZE_MB * 1024:
-            raise ValueError(
-                f"Repository is too large ({size_mb} MB). "
-                f"Maximum supported size is {MAX_REPO_SIZE_MB} MB."
-            )
+        if size_mb > 2000:
+            print(f"SIZE CHECK WARNING: Large repository ({size_mb} MB). Proceeding with lightweight source ZIP archive download.")
 
         return size_kb
 
-    except ValueError:
-        raise
     except Exception as e:
         print(f"SIZE CHECK: Could not determine repo size: {e}")
         return 0
