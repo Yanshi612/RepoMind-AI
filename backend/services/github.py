@@ -104,6 +104,22 @@ def _safe_extract(zip_file: zipfile.ZipFile, destination: str):
     zip_file.extractall(destination)
 
 
+def _purge_stale_clones(clones_dir: str):
+    try:
+        if os.path.exists(clones_dir):
+            for item in os.listdir(clones_dir):
+                item_path = os.path.join(clones_dir, item)
+                try:
+                    if os.path.isdir(item_path):
+                        shutil.rmtree(item_path, ignore_errors=True)
+                    else:
+                        os.remove(item_path)
+                except Exception:
+                    pass
+    except Exception:
+        pass
+
+
 def clone_repository(repo_url: str) -> str:
     """
     Downloads a GitHub repository as a ZIP archive and extracts it
@@ -113,6 +129,7 @@ def clone_repository(repo_url: str) -> str:
     owner, repo_name = _parse_repo(repo_url)
 
     clones_dir = os.path.join(tempfile.gettempdir(), "repomind_cloned_repos")
+    _purge_stale_clones(clones_dir)
     os.makedirs(clones_dir, exist_ok=True)
 
     clean_url = repo_url.rstrip("/")

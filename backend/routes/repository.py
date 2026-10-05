@@ -3,6 +3,7 @@ import asyncio
 import json
 import os
 import tempfile
+import shutil
 
 from fastapi import APIRouter, HTTPException, BackgroundTasks
 
@@ -246,6 +247,7 @@ async def _run_analysis_job(job_id: str, repo_url: str):
     def is_cancelled() -> bool:
         return jobs.get(job_id, {}).get("status") == "cancelled"
 
+    repo_path = None
     try:
 
         # ----------------------------------------
@@ -331,3 +333,10 @@ async def _run_analysis_job(job_id: str, repo_url: str):
         })
         _save_jobs()
         raise e
+    finally:
+        if repo_path and os.path.exists(repo_path):
+            try:
+                shutil.rmtree(repo_path, ignore_errors=True)
+                print(f"[{job_id}] Cleaned up temp repository directory: {repo_path}")
+            except Exception:
+                pass
